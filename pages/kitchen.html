@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastOrder - Kitchen</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body class="bg-gray-100">
+    <header class="bg-orange-600 text-white p-4 shadow-md">
+        <div class="container mx-auto">
+            <h1 class="text-2xl font-bold">Kitchen Dashboard</h1>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-4">
+        <div class="flex space-x-4 mb-6">
+            <button id="all-orders" class="px-4 py-2 bg-blue-600 text-white rounded">All Orders</button>
+            <button id="preparing-orders" class="px-4 py-2 bg-yellow-600 text-white rounded">In Preparation</button>
+            <button id="ready-orders" class="px-4 py-2 bg-green-600 text-white rounded">Ready</button>
+            <button id="delivered-orders" class="px-4 py-2 bg-gray-600 text-white rounded">Delivered</button>
+        </div>
+
+        <div class="mb-6 p-4 bg-white rounded-lg shadow">
+            <h2 class="text-xl font-semibold mb-2">Mark Item Unavailable</h2>
+            <div class="flex">
+                <select id="menu-items" class="border p-2 rounded-l w-full">
+                    <!-- Menu items will be loaded here -->
+                </select>
+                <button id="mark-unavailable" class="bg-red-600 text-white px-4 py-2 rounded-r">
+                    Mark Unavailable
+                </button>
+            </div>
+        </div>
+
+        <div id="orders-container" class="space-y-4">
+            <!-- Orders will be loaded here -->
+            <p id="no-orders-message" class="text-gray-500">No orders found</p>
+        </div>
+    </main>
+
+    <script>
+        // Current filter status
+        let currentFilter = 'all';
+
+        // Format order status with appropriate color
+        function formatStatus(status) {
+            const statusClasses = {
+                'Pending Approval': 'bg-yellow-100 text-yellow-800',
+                'In Preparation': 'bg-blue-100 text-blue-800',
+                'Ready': 'bg-green-100 text-green-800',
+                'Delivered': 'bg-gray-100 text-gray-800'
+            };
+            return `<span class="px-2 py-1 rounded-full text-xs font-semibold ${statusClasses[status]}">${status}</span>`;
+        }
+
+        // Load menu items for unavailable marking
+        async function loadMenuItems() {
+            try {
+                const response = await fetch('/backend/api.php/menu');
+                const menuItems = await response.json();
+                const select = document.getElementById('menu-items');
+                
+                select.innerHTML = menuItems.map(item => 
+                    `<option value="${item.id}">${item.name} ($${item.price.toFixed(2)})</option>`
+                ).join('');
+            } catch (error) {
+                console.error('Error loading menu items:', error);
+            }
+        }
+
+        // Mark item as unavailable
+        document.getElementById('mark-unavailable').addEventListener('click', async function() {
+            const itemId = document.getElementById('menu-items').value;
+            
+            try {
+                const response = await fetch(`/backend/api.php/menu/${itemId}/unavailable`, {
+                    method: 'PUT'
+                });
+
+                if (response.ok) {
+                    alert('Item marked as unavailable');
+                    loadMenuItems();
+                } else {
+                    throw new Error('Failed to mark item unavailable');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert(error.message);
+            }
+        });
+
+        // Load and display orders
+        async function loadOrders(filter = 'all') {
+            try {
+                const endpoint = filter === 'all' 
+                    ? '/backend/api.php/orders' 
+                    : `/backend/api.php/orders?status=${filter}`;
+                
+                const response = await fetch(endpoint);
+                const orders = await response.json();
+                displayOrders(orders);
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                document.getElementById('no-orders-message').textContent = 'Error loading orders';
+            }
+        }
+
+        // Display orders
+        function displayOrders(orders) {
+            const container = document.getElementById('orders-container');
+            const noOrdersMessage = document.getElementById('no-orders-message');
+
+            if (orders.length === 0) {
+                noOrdersMessage.classList.remove('hidden');
+                return;
+            } else {
+                noOrdersMessage.classList.add('hidden');
+            }
+
+            container.innerHTML = orders.map(order => {
+                const items = JSON.parse(order.items);
+                const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                const tax = total * 0.1;
+                const grandTotal = total + tax;
+
+                return `
+                    <div class="bg-white rounded-lg shadow-md p-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold">Order #${order.id}</h3>
+                            <div class="text-sm text-gray-500">
+                                ${new Date(order.created_at).toLocaleString()}
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            ${formatStatus(order.status)}
+                            <span class="ml-2 text-sm">Payment: ${order.payment_method}</span>
+                        </div>
+                        
+                        <div class="border-t pt-3 mb-3">
+                            ${items.map(item => `
+                                <div class="flex justify-between py-1">
+                                    <span>${item.quantity} × ${item.name}</span>
+                                    <span>$${(item.price * item.quantity).toFixed(2)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div class="border-t pt-3">
+                            <div class="flex justify-between font-bold mb-2">
+                                <span>Total:</span>
+                                <span>$${grandTotal.toFixed(2)}</span>
+                            </div>
+                            
+                            <div class="flex space-x-2">
+                                ${order.status === 'Pending Approval' ? '' : `
+                                    ${order.status !== 'In Preparation' ? '' : `
+                                        <button onclick="updateOrderStatus(${order.id}, 'Ready')" 
+                                                class="flex-1 bg-green-600 text-white py-2 rounded">
+                                            Mark Ready
+                                        </button>
+                                    `}
+                                    ${order.status !== 'Ready' ? '' : `
+                                        <button onclick="updateOrderStatus(${order.id}, 'Delivered')" 
+                                                class="flex-1 bg-gray-600 text-white py-2 rounded">
+                                            Mark Delivered
+                                        </button>
+                                    `}
+                                    ${order.status === 'In Preparation' ? `
+                                        <button onclick="updateOrderStatus(${order.id}, 'Pending Approval')" 
+                                                class="flex-1 bg-yellow-600 text-white py-2 rounded">
+                                            Revert to Pending
+                                        </button>
+                                    ` : ''}
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Update order status
+        async function updateOrderStatus(orderId, status) {
+            try {
+                const response = await fetch(`/backend/api.php/order/${orderId}/status`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ status })
+                });
+
+                if (response.ok) {
+                    loadOrders(currentFilter);
+                } else {
+                    throw new Error('Failed to update order status');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert(error.message);
+            }
+        }
+
+        // Set up filter buttons
+        document.getElementById('all-orders').addEventListener('click', () => {
+            currentFilter = 'all';
+            loadOrders();
+        });
+
+        document.getElementById('preparing-orders').addEventListener('click', () => {
+            currentFilter = 'In Preparation';
+            loadOrders('In Preparation');
+        });
+
+        document.getElementById('ready-orders').addEventListener('click', () => {
+            currentFilter = 'Ready';
+            loadOrders('Ready');
+        });
+
+        document.getElementById('delivered-orders').addEventListener('click', () => {
+            currentFilter = 'Delivered';
+            loadOrders('Delivered');
+        });
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', () => {
+            loadMenuItems();
+            loadOrders();
+            
+            // Refresh orders every 30 seconds
+            setInterval(() => loadOrders(currentFilter), 30000);
+        });
+    </script>
+</body>
+</html>
